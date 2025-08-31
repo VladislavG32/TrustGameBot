@@ -1006,13 +1006,11 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 СТАТУС ИГРЫ:\n\n"
         f"• Партнер: @{partner_data['username']}\n"
         f"• Уровень: {current_level}\n"
+        f"• /end_game - завершить текущую игру\n"
+        f"• /new_game - начать новую игру"
         f"• {current_turn}\n"
         f"• Твои Джокеры: {jokers_you} 🃏\n"
         f"• {action_status}"
-
-
-        f"• /end_game - завершить текущую игру\n"
-        f"• /new_game - начать новую игру",
     )
 
     await update.message.reply_text(status_text)
