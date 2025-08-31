@@ -5,7 +5,7 @@ import os
 import time
 import threading
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from config import BOT_TOKEN
 
 # Функция для поддержания активности бота
@@ -778,19 +778,30 @@ async def truth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db[pair_id]['users'][str(user_id)]['truth_count'] = current_user['truth_count']
     save_db(db)
 
-    action_keyboard = [['/joker', '/punishment'], ['/status']]
+    action_keyboard = [['/done', '/joker'], ['/status']]
     reply_markup = ReplyKeyboardMarkup(action_keyboard, resize_keyboard=True)
     
     level_names = {1: "❄️", 2: "🌊", 3: "🔥"}
     
+    # Отправляем вопрос обоим игрокам
+    partner_id = [uid for uid in user_data['users'].keys() if uid != str(user_id)][0]
+    partner_username = user_data['users'][partner_id]['username']
+    
     await update.message.reply_text(
         f"🤔 Ты выбрал(а) ПРАВДУ для СЕБЯ! {level_names[level]}\n\n"
         f"Вопрос: {question}\n\n"
-        f"📝 Ответ пришли партнеру в общий чат!\n\n"
-        f"Если не хочешь отвечать:\n"
-        f"• /joker - Пропустить (осталось: {current_user['jokers']} 🃏)\n"
-        f"• /punishment - Получить наказание",
+        f"📝 Ответ пришли партнеру в общий чат!\n"
+        f"Когда ответишь - нажми /done",
         reply_markup=reply_markup
+    )
+    
+    # Партнеру тоже отправляем информацию
+    await context.bot.send_message(
+        chat_id=partner_id,
+        text=f"🤔 @{user_data['users'][str(user_id)]['username']} выбрал(а) ПРАВДУ! {level_names[level]}\n\n"
+             f"Вопрос: {question}\n\n"
+             f"📝 Жди ответа в вашем общем чате!\n"
+             f"После ответа он(а) нажмет /done и ход перейдет к тебе."
     )
 
 async def dare(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -818,18 +829,74 @@ async def dare(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db[pair_id]['users'][str(user_id)]['truth_count'] = current_user['truth_count']
     save_db(db)
 
-    action_keyboard = [['/joker', '/punishment'], ['/status']]
+    action_keyboard = [['/done', '/joker'], ['/status']]
     reply_markup = ReplyKeyboardMarkup(action_keyboard, resize_keyboard=True)
     
     level_names = {1: "❄️", 2: "🌊", 3: "🔥"}
     
+    # Отправляем задание обоим игрокам
+    partner_id = [uid for uid in user_data['users'].keys() if uid != str(user_id)][0]
+    partner_username = user_data['users'][partner_id]['username']
+    
     await update.message.reply_text(
         f"🎯 Ты выбрал(а) ДЕЙСТВИЕ для СЕБЯ! {level_names[level]}\n\n"
         f"Задание: {task}\n\n"
-        f"🎬 Выполни и пришли результат партнеру!\n\n"
-        f"Если не хочешь выполнять:\n"
-        f"• /joker - Пропустить (осталось: {current_user['jokers']} 🃏)\n"
-        f"• /punishment - Получить наказание",
+        f"🎬 Выполни и пришли результат партнеру!\n"
+        f"Когда выполнишь - нажми /done",
+        reply_markup=reply_markup
+    )
+    
+    # Партнеру тоже отправляем информацию
+    await context.bot.send_message(
+        chat_id=partner_id,
+        text=f"🎯 @{user_data['users'][str(user_id)]['username']} выбрал(а) ДЕЙСТВИЕ! {level_names[level]}\n\n"
+             f"Задание: {task}\n\n"
+             f"🎬 Жди результат в вашем общем чате!\n"
+             f"После выполнения он(а) нажмет /done и ход перейдет к тебе."
+    )
+
+async def done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    user_data, pair_id = get_user_data(user_id)
+
+    if not user_data:
+        await update.message.reply_text("❌ Ты не в игре!")
+        return
+
+    current_user = user_data['users'][str(user_id)]
+    
+    if not current_user['pending_action']:
+        await update.message.reply_text("❌ У тебя нет активного задания!")
+        return
+
+    # Находим партнера
+    partner_id = [uid for uid in user_data['users'].keys() if uid != str(user_id)][0]
+    partner_data = user_data['users'][partner_id]
+    
+    # Очищаем задание и передаем ход партнеру
+    current_user['pending_action'] = None
+    user_data['current_turn'] = partner_id
+
+    db = load_db()
+    db[pair_id]['users'][str(user_id)]['pending_action'] = None
+    db[pair_id]['current_turn'] = partner_id
+    save_db(db)
+
+    action_keyboard = [['/truth', '/dare'], ['/status']]
+    reply_markup = ReplyKeyboardMarkup(action_keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(
+        "✅ Задание выполнено! Ход передан партнеру.",
+        reply_markup=ReplyKeyboardMarkup([['/status']], resize_keyboard=True)
+    )
+    
+    # Уведомляем партнера
+    await context.bot.send_message(
+        chat_id=partner_id,
+        text=f"✅ @{user_data['users'][str(user_id)]['username']} выполнил(а) задание!\n\n"
+             f"🎮 Теперь твой ход! Выбери:\n"
+             f"• /truth - Правда 🤔\n"
+             f"• /dare - Действие 🎯",
         reply_markup=reply_markup
     )
 
@@ -950,6 +1017,7 @@ def main():
     application.add_handler(CommandHandler("game", game))
     application.add_handler(CommandHandler("truth", truth))
     application.add_handler(CommandHandler("dare", dare))
+    application.add_handler(CommandHandler("done", done))
     application.add_handler(CommandHandler("joker", joker))
     application.add_handler(CommandHandler("punishment", punishment))
     application.add_handler(CommandHandler("status", status))
